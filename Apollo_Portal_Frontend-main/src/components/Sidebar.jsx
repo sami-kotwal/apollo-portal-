@@ -99,6 +99,7 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
     pm: [
       { label: "Dashboard", path: "/pm", icon: "dashboard" },
       { label: "Projects", path: "/pm/projects", icon: "projects" },
+      { label: "Client List", path: "/pm/clients", icon: "users" },
       { label: "Add Tasks", path: "/pm/tasks", icon: "plus" },
       { label: "Work Review", path: "/pm/review", icon: "review" },
       { label: "Notifications", path: "/pm/notifications", icon: "notifications" },

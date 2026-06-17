@@ -1,6 +1,6 @@
-import { Routes, Route } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { Plus, X, Link as LinkIcon, Pencil, Send, Trash2 } from "lucide-react";
+import { Routes, Route, useNavigate, useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ArrowLeft, ExternalLink, Plus, UploadCloud, X, Link as LinkIcon, Pencil, Send, Trash2 } from "lucide-react";
 import DashboardLayout from "../../layouts/DashboardLayout";
 import { Input, Button, Textarea, Select, Badge, Alert, Card } from "../../components/FormComponents";
 import API from "../../services/api";
@@ -9,6 +9,24 @@ import DashboardAnalytics from "../../components/DashboardAnalytics";
 import TaskStatusFilter, { filterTasksByStatus } from "../../components/TaskStatusFilter";
 import Notifications from "../Notifications";
 import { getStoredUser } from "../../utils/authStorage";
+import { formatDateOnly } from "../../utils/dateOnly";
+
+const CLIENT_STATUS_OPTIONS = [
+  { value: "active", label: "Active Clients" },
+  { value: "retention", label: "Retention Clients" },
+  { value: "payment_due", label: "Payment Due Clients" },
+  { value: "upsell", label: "Upsell Opportunities" },
+];
+
+const CLIENT_STATUS_TONES = {
+  active: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+  retention: "border-blue-500/30 bg-blue-500/10 text-blue-300",
+  payment_due: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+  upsell: "border-purple-500/30 bg-purple-500/10 text-purple-300",
+};
+
+const getPackageId = (item) => (typeof item === "string" ? item : item?.packageId || item?.id || "");
+const getStatusLabel = (status) => CLIENT_STATUS_OPTIONS.find((item) => item.value === status)?.label || "Active Clients";
 
 function PMHome() {
   const user = getStoredUser();
@@ -39,6 +57,593 @@ function PMHome() {
       mode="pm"
       showMonitoringSummary
     />
+  );
+}
+
+function PMClientList() {
+  const navigate = useNavigate();
+  const [customers, setCustomers] = useState([]);
+  const [statusDrafts, setStatusDrafts] = useState({});
+  const [activeFilter, setActiveFilter] = useState("all");
+  const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const loadCustomers = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const res = await API.get("/users/customers");
+      const rows = res.data || [];
+      setCustomers(rows);
+      setStatusDrafts(
+        rows.reduce((acc, customer) => {
+          acc[customer._id] = customer.clientStatus || "active";
+          return acc;
+        }, {})
+      );
+    } catch (err) {
+      setError(err.response?.data?.message || "Could not load client list");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCustomers();
+  }, [loadCustomers]);
+
+  const statusCounts = useMemo(
+    () =>
+      CLIENT_STATUS_OPTIONS.reduce((acc, option) => {
+        acc[option.value] = customers.filter((customer) => (customer.clientStatus || "active") === option.value).length;
+        return acc;
+      }, {}),
+    [customers]
+  );
+
+  const filteredCustomers = useMemo(
+    () =>
+      activeFilter === "all"
+        ? customers
+        : customers.filter((customer) => (customer.clientStatus || "active") === activeFilter),
+    [activeFilter, customers]
+  );
+
+  const saveClientStatus = async (customerId) => {
+    const status = statusDrafts[customerId] || "active";
+    setSavingId(customerId);
+    setMessage("");
+    setError("");
+
+    try {
+      await API.patch(`/users/customers/${customerId}/client-status`, { status });
+      setCustomers((current) =>
+        current.map((customer) =>
+          customer._id === customerId
+            ? {
+                ...customer,
+                clientStatus: status,
+                customerProfile: {
+                  ...(customer.customerProfile || {}),
+                  clientStatus: status,
+                },
+              }
+            : customer
+        )
+      );
+      setMessage("Client status updated successfully.");
+    } catch (err) {
+      setError(err.response?.data?.message || "Could not update client status");
+    } finally {
+      setSavingId("");
+    }
+  };
+
+  return (
+    <div>
+      <div className="mb-8">
+        <h1 className="text-4xl font-bold text-white mb-2">Client List</h1>
+        <p className="text-slate-400">PM client status, selected packages, and request activity.</p>
+      </div>
+
+      {(message || error) && (
+        <div
+          className={`mb-5 rounded-lg border p-3 text-sm ${
+            error
+              ? "border-red-500/30 bg-red-500/10 text-red-200"
+              : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+          }`}
+        >
+          {error || message}
+        </div>
+      )}
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {CLIENT_STATUS_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => setActiveFilter(option.value)}
+            className={`rounded-xl border p-5 text-left transition ${
+              activeFilter === option.value
+                ? "border-blue-500 bg-blue-500/10"
+                : "border-slate-800 bg-slate-900/80 hover:border-slate-700 hover:bg-slate-900"
+            }`}
+          >
+            <p className="text-sm text-slate-400">{option.label}</p>
+            <p className="mt-2 text-3xl font-bold text-white">{statusCounts[option.value] || 0}</p>
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-5 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setActiveFilter("all")}
+          className={`rounded-lg border px-4 py-2 text-sm font-semibold transition ${
+            activeFilter === "all"
+              ? "border-blue-500 bg-blue-600 text-white"
+              : "border-slate-700 bg-slate-900 text-slate-300 hover:border-blue-500/50 hover:text-white"
+          }`}
+        >
+          All Clients
+        </button>
+        {CLIENT_STATUS_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => setActiveFilter(option.value)}
+            className={`rounded-lg border px-4 py-2 text-sm font-semibold transition ${
+              activeFilter === option.value
+                ? "border-blue-500 bg-blue-600 text-white"
+                : "border-slate-700 bg-slate-900 text-slate-300 hover:border-blue-500/50 hover:text-white"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-6 overflow-hidden rounded-xl border border-slate-800 bg-slate-900/80">
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="border-b border-slate-800 bg-slate-950/60 text-slate-400">
+              <tr>
+                <th className="px-4 py-3 font-semibold">Client</th>
+                <th className="px-4 py-3 font-semibold">Company</th>
+                <th className="px-4 py-3 font-semibold">Status</th>
+                <th className="px-4 py-3 font-semibold">Packages</th>
+                <th className="px-4 py-3 font-semibold">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800">
+              {loading && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                    Loading clients...
+                  </td>
+                </tr>
+              )}
+              {!loading && filteredCustomers.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                    No clients found in this status.
+                  </td>
+                </tr>
+              )}
+              {!loading &&
+                filteredCustomers.map((customer) => {
+                  const currentStatus = customer.clientStatus || "active";
+                  const draftStatus = statusDrafts[customer._id] || currentStatus;
+                  const statusChanged = draftStatus !== currentStatus;
+
+                  return (
+                    <tr key={customer._id} className="text-slate-300 transition hover:bg-slate-800/50">
+                      <td className="px-4 py-4">
+                        <p className="font-semibold text-white">{customer.name}</p>
+                        <p className="mt-1 text-xs text-slate-500">{customer.email}</p>
+                      </td>
+                      <td className="px-4 py-4">{customer.customerProfile?.companyName || "Not added"}</td>
+                      <td className="px-4 py-4">
+                        <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${CLIENT_STATUS_TONES[currentStatus] || CLIENT_STATUS_TONES.active}`}>
+                          {getStatusLabel(currentStatus)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4">
+                        {customer.selectedPackages?.length ? (
+                          <div className="flex max-w-xs flex-wrap gap-1.5">
+                            {customer.selectedPackages.map((item, index) => {
+                              const packageId = getPackageId(item);
+                              const billingCycle = typeof item === "string" ? "" : item?.billingCycle || "";
+                              const price = typeof item === "string" ? "" : item?.price || "";
+                              return (
+                                <span key={`${packageId}-${billingCycle || "legacy"}-${index}`} className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-semibold text-blue-200">
+                                  {packageId.replaceAll("-", " ")}
+                                  {billingCycle && <span className="text-blue-300"> - {billingCycle.replace("_", " ")} {price && `(${price})`}</span>}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span className="text-slate-500">None selected</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="flex min-w-72 items-center gap-2">
+                          <select
+                            value={draftStatus}
+                            onChange={(event) =>
+                              setStatusDrafts((current) => ({
+                                ...current,
+                                [customer._id]: event.target.value,
+                              }))
+                            }
+                            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
+                          >
+                            {CLIENT_STATUS_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            disabled={!statusChanged || savingId === customer._id}
+                            onClick={() => saveClientStatus(customer._id)}
+                            className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200 transition hover:bg-emerald-500/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {savingId === customer._id ? "Saving" : "Save"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/pm/clients/${customer._id}`)}
+                            className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-200 transition hover:bg-blue-500/20 hover:text-white"
+                          >
+                            Details
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PMClientDetails() {
+  const navigate = useNavigate();
+  const { clientId } = useParams();
+  const [customer, setCustomer] = useState(null);
+  const [form, setForm] = useState({
+    clientStatus: "active",
+    screenshotImage: "",
+    callRecordingLinks: [],
+  });
+  const [recordingInput, setRecordingInput] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const loadCustomer = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const res = await API.get(`/users/customers/${clientId}`);
+      const profile = res.data || {};
+      setCustomer(profile);
+      setForm({
+        clientStatus: profile.clientStatus || "active",
+        screenshotImage: profile.customerProfile?.screenshotImage || profile.customerProfile?.profileImage || "",
+        callRecordingLinks: profile.customerProfile?.callRecordingLinks || [],
+      });
+    } catch (err) {
+      setError(err.response?.data?.message || "Could not load client profile");
+    } finally {
+      setLoading(false);
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    loadCustomer();
+  }, [loadCustomer]);
+
+  const handleImageUpload = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setError("Please upload an image file.");
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      setError("Image must be 2 MB or smaller.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setError("");
+      setForm((current) => ({ ...current, screenshotImage: reader.result || "" }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const addRecordingLink = () => {
+    const link = recordingInput.trim();
+    if (!link) return;
+
+    setForm((current) => ({
+      ...current,
+      callRecordingLinks: [...current.callRecordingLinks, link],
+    }));
+    setRecordingInput("");
+  };
+
+  const removeRecordingLink = (index) => {
+    setForm((current) => ({
+      ...current,
+      callRecordingLinks: current.callRecordingLinks.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  };
+
+  const saveProfile = async () => {
+    setSaving(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const res = await API.patch(`/users/customers/${clientId}/profile`, form);
+      const profile = res.data || {};
+      setCustomer(profile);
+      setForm({
+        clientStatus: profile.clientStatus || "active",
+        screenshotImage: profile.customerProfile?.screenshotImage || profile.customerProfile?.profileImage || "",
+        callRecordingLinks: profile.customerProfile?.callRecordingLinks || [],
+      });
+      setMessage("Client profile updated successfully.");
+    } catch (err) {
+      setError(err.response?.data?.message || "Could not update client profile");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const profile = customer?.customerProfile || {};
+  const currentStatus = form.clientStatus || "active";
+
+  return (
+    <div>
+      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <button
+            type="button"
+            onClick={() => navigate("/pm/clients")}
+            className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-300 transition hover:border-blue-500/50 hover:text-white"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Client List
+          </button>
+          <h1 className="text-4xl font-bold text-white mb-2">Client Profile</h1>
+          <p className="text-slate-400">Full client details, screenshot upload, and call recording references.</p>
+        </div>
+        <button
+          type="button"
+          onClick={saveProfile}
+          disabled={saving || loading || !customer}
+          className="inline-flex items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-5 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {saving ? "Saving..." : "Save Profile"}
+        </button>
+      </div>
+
+      {(message || error) && (
+        <div
+          className={`mb-5 rounded-lg border p-3 text-sm ${
+            error
+              ? "border-red-500/30 bg-red-500/10 text-red-200"
+              : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+          }`}
+        >
+          {error || message}
+        </div>
+      )}
+
+      {loading && <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-6 text-center text-slate-400">Loading client profile...</div>}
+
+      {!loading && customer && (
+        <div className="space-y-6">
+          <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
+            <section className="rounded-xl border border-slate-800 bg-slate-900/80 p-6">
+              <div className="flex flex-col items-center text-center">
+                <div className="flex h-36 w-36 items-center justify-center overflow-hidden rounded-xl border border-slate-700 bg-slate-950">
+                  {form.screenshotImage ? (
+                    <img src={form.screenshotImage} alt="Client screenshot" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="text-sm font-semibold text-slate-500">No screenshot</span>
+                  )}
+                </div>
+                <label className="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-sm font-semibold text-blue-200 transition hover:bg-blue-500/20 hover:text-white">
+                  <UploadCloud className="h-4 w-4" />
+                  Upload Screenshot
+                  <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                </label>
+                {form.screenshotImage && (
+                  <button
+                    type="button"
+                    onClick={() => setForm((current) => ({ ...current, screenshotImage: "" }))}
+                    className="mt-2 text-sm font-semibold text-slate-400 hover:text-white"
+                  >
+                    Remove screenshot
+                  </button>
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-slate-800 bg-slate-900/80 p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-white">{customer.name}</h2>
+                  <p className="mt-1 text-slate-400">{customer.email}</p>
+                </div>
+                <span className={`inline-flex w-fit rounded-full border px-3 py-1 text-xs font-bold ${CLIENT_STATUS_TONES[currentStatus] || CLIENT_STATUS_TONES.active}`}>
+                  {getStatusLabel(currentStatus)}
+                </span>
+              </div>
+
+              <div className="mt-6 grid gap-4 md:grid-cols-2">
+                <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Company</p>
+                  <p className="mt-2 font-semibold text-white">{profile.companyName || "Not added"}</p>
+                </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Phone</p>
+                  <p className="mt-2 font-semibold text-white">{profile.phone || "Not added"}</p>
+                </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Registered</p>
+                  <p className="mt-2 font-semibold text-white">{customer.createdAt ? formatDateOnly(customer.createdAt) : "Not recorded"}</p>
+                </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Last Request</p>
+                  <p className="mt-2 font-semibold text-white">{customer.latestRequestAt ? formatDateOnly(customer.latestRequestAt) : "No requests"}</p>
+                </div>
+              </div>
+
+              <label className="mt-5 block">
+                <span className="text-sm font-semibold text-slate-300">Client Status</span>
+                <select
+                  value={form.clientStatus}
+                  onChange={(event) => setForm((current) => ({ ...current, clientStatus: event.target.value }))}
+                  className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-blue-500"
+                >
+                  {CLIENT_STATUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </section>
+          </div>
+
+          <section className="rounded-xl border border-slate-800 bg-slate-900/80 p-6">
+            <h2 className="text-xl font-bold text-white">Call Recordings</h2>
+            <div className="mt-4 flex flex-col gap-3 md:flex-row">
+              <input
+                type="url"
+                value={recordingInput}
+                onChange={(event) => setRecordingInput(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && (event.preventDefault(), addRecordingLink())}
+                placeholder="Paste call recording link"
+                className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-blue-500"
+              />
+              <button
+                type="button"
+                onClick={addRecordingLink}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-5 py-3 text-sm font-semibold text-blue-200 transition hover:bg-blue-500/20 hover:text-white"
+              >
+                <Plus className="h-4 w-4" />
+                Add Link
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {form.callRecordingLinks.map((link, index) => (
+                <div key={`${link}-${index}`} className="flex flex-col gap-3 rounded-lg border border-slate-800 bg-slate-950/50 p-3 md:flex-row md:items-center md:justify-between">
+                  <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex min-w-0 items-center gap-2 text-sm font-semibold text-blue-200 hover:text-white">
+                    <ExternalLink className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{link}</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => removeRecordingLink(index)}
+                    className="w-fit rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-500/20 hover:text-white"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              {form.callRecordingLinks.length === 0 && (
+                <p className="rounded-lg border border-slate-800 bg-slate-950/40 p-4 text-center text-sm text-slate-400">
+                  No call recording links attached yet.
+                </p>
+              )}
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-slate-800 bg-slate-900/80 p-6">
+            <h2 className="text-xl font-bold text-white">Packages</h2>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {customer.selectedPackages?.length ? (
+                customer.selectedPackages.map((item, index) => {
+                  const packageId = getPackageId(item);
+                  const billingCycle = typeof item === "string" ? "" : item?.billingCycle || "";
+                  const price = typeof item === "string" ? "" : item?.price || "";
+                  return (
+                    <span key={`${packageId}-${index}`} className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-sm font-semibold text-blue-200">
+                      {packageId.replaceAll("-", " ")}
+                      {billingCycle && <span className="text-blue-300"> - {billingCycle.replace("_", " ")} {price && `(${price})`}</span>}
+                    </span>
+                  );
+                })
+              ) : (
+                <p className="text-slate-400">No packages selected.</p>
+              )}
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-slate-800 bg-slate-900/80 p-6">
+            <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <h2 className="text-xl font-bold text-white">Requests</h2>
+              <span className="w-fit rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs font-semibold text-slate-300">
+                {customer.totalRequests || 0} total - {customer.openRequests || 0} open
+              </span>
+            </div>
+            <div className="overflow-x-auto rounded-lg border border-slate-800">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-slate-950/70 text-slate-400">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Title</th>
+                    <th className="px-4 py-3 font-semibold">Type</th>
+                    <th className="px-4 py-3 font-semibold">Status</th>
+                    <th className="px-4 py-3 font-semibold">Priority</th>
+                    <th className="px-4 py-3 font-semibold">Created</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {(customer.requests || []).map((request) => (
+                    <tr key={request._id} className="text-slate-300">
+                      <td className="px-4 py-3 font-semibold text-white">{request.title || "Untitled request"}</td>
+                      <td className="px-4 py-3 capitalize">{request.type || "request"}</td>
+                      <td className="px-4 py-3 capitalize">{request.status?.replaceAll("_", " ") || "pending"}</td>
+                      <td className="px-4 py-3 capitalize">{request.priority || "normal"}</td>
+                      <td className="px-4 py-3">{request.createdAt ? formatDateOnly(request.createdAt) : "Not recorded"}</td>
+                    </tr>
+                  ))}
+                  {(!customer.requests || customer.requests.length === 0) && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                        No requests found for this client.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -520,6 +1125,8 @@ export default function PMDashboard() {
       <Routes>
         <Route index element={<PMHome />} />
         <Route path="projects" element={<PMProjects />} />
+        <Route path="clients" element={<PMClientList />} />
+        <Route path="clients/:clientId" element={<PMClientDetails />} />
         <Route path="tasks" element={<PMTasks />} />
         <Route path="review" element={<PMReview />} />
         <Route

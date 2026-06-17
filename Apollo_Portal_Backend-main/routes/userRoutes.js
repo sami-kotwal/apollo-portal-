@@ -28,6 +28,14 @@ const adminOnly = (req, res, next) => {
   next();
 };
 
+const adminOrPmOnly = (req, res, next) => {
+  if (!["admin", "pm"].includes(req.user?.role)) {
+    return res.status(403).json({ message: "Admin or PM access required" });
+  }
+
+  next();
+};
+
 const getDepartmentForRole = (role) => {
   if (role === "developer" || role === "teamleader_dev") return "development";
   if (role === "designer" || role === "teamleader_design") return "designing";
@@ -45,11 +53,42 @@ const VALID_CUSTOMER_PACKAGE_IDS = new Set([
   "social-management",
   "branding-design",
 ]);
+const VALID_CLIENT_STATUSES = new Set(["active", "retention", "payment_due", "upsell"]);
 const getCustomerPackageId = (item) => (typeof item === "string" ? item : item?.packageId || item?.id || "");
 const cleanCustomerPackages = (packages = []) =>
   Array.isArray(packages)
     ? packages.filter((item) => VALID_CUSTOMER_PACKAGE_IDS.has(getCustomerPackageId(item)))
     : [];
+const cleanText = (value = "") => String(value || "").trim();
+const getCustomerPayload = async (customerId) => {
+  const [customer, requests] = await Promise.all([
+    User.findOne({ _id: customerId, role: "customer" })
+      .select("name email customerProfile createdAt updatedAt")
+      .lean(),
+    CustomerRequest.find({ customer: customerId })
+      .select("type title status priority details createdAt updatedAt")
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean(),
+  ]);
+
+  if (!customer) return null;
+  const latestRequestAt = requests.reduce((latest, item) => {
+    const time = item.createdAt ? new Date(item.createdAt).getTime() : 0;
+    return time > latest.time ? { time, value: item.createdAt } : latest;
+  }, { time: 0, value: null }).value;
+
+  return {
+    ...customer,
+    selectedPackages: cleanCustomerPackages(customer.customerProfile?.selectedPackages),
+    clientStatus: customer.customerProfile?.clientStatus || "active",
+    totalRequests: requests.length,
+    openRequests: requests.filter((item) => !["completed", "closed"].includes(item.status)).length,
+    latestRequestAt,
+    requests,
+    domainRequests: requests.filter((item) => item.type === "domain"),
+  };
+};
 
 const sanitizeAttendance = (attendance = {}, existingAttendance = {}) => {
   const startTime = TIME_PATTERN.test(attendance.startTime || "") ? attendance.startTime : "09:00";
@@ -155,7 +194,7 @@ router.get("/", protect, async (req, res) => {
   res.json(users.map(withAttendanceDefaults));
 });
 
-router.get("/customers", protect, adminOnly, async (req, res) => {
+router.get("/customers", protect, adminOrPmOnly, async (req, res) => {
   const [customers, requestStats, customerRequests] = await Promise.all([
     User.find({ role: "customer" })
       .select("name email customerProfile createdAt updatedAt")
@@ -196,6 +235,7 @@ router.get("/customers", protect, adminOnly, async (req, res) => {
       return {
         ...customer,
         selectedPackages: cleanCustomerPackages(customer.customerProfile?.selectedPackages),
+        clientStatus: customer.customerProfile?.clientStatus || "active",
         totalRequests: stats.totalRequests || 0,
         openRequests: stats.openRequests || 0,
         latestRequestAt: stats.latestRequestAt || null,
@@ -203,6 +243,67 @@ router.get("/customers", protect, adminOnly, async (req, res) => {
       };
     }),
   );
+});
+
+router.get("/customers/:id", protect, adminOrPmOnly, async (req, res) => {
+  const customer = await getCustomerPayload(req.params.id);
+  if (!customer) return res.status(404).json({ message: "Customer not found" });
+  res.json(customer);
+});
+
+router.patch("/customers/:id/profile", protect, adminOrPmOnly, async (req, res) => {
+  const status = cleanText(req.body?.clientStatus || req.body?.status || "active");
+  const screenshotImage = cleanText(req.body?.screenshotImage || req.body?.profileImage);
+  const callRecordingLinks = Array.isArray(req.body?.callRecordingLinks)
+    ? req.body.callRecordingLinks.map((item) => cleanText(item)).filter(Boolean).slice(0, 50)
+    : [];
+
+  if (!VALID_CLIENT_STATUSES.has(status)) {
+    return res.status(400).json({ message: "Invalid client status" });
+  }
+
+  if (screenshotImage && !screenshotImage.startsWith("data:image/") && !/^https?:\/\//i.test(screenshotImage)) {
+    return res.status(400).json({ message: "Screenshot must be an uploaded image or image URL" });
+  }
+
+  const user = await User.findOneAndUpdate(
+    { _id: req.params.id, role: "customer" },
+    {
+      $set: {
+        "customerProfile.clientStatus": status,
+        "customerProfile.screenshotImage": screenshotImage,
+        "customerProfile.callRecordingLinks": callRecordingLinks,
+      },
+    },
+    { returnDocument: "after", runValidators: true }
+  ).select("_id");
+
+  if (!user) return res.status(404).json({ message: "Customer not found" });
+
+  const customer = await getCustomerPayload(req.params.id);
+  res.json(customer);
+});
+
+router.patch("/customers/:id/client-status", protect, adminOrPmOnly, async (req, res) => {
+  const status = String(req.body?.status || "").trim();
+
+  if (!VALID_CLIENT_STATUSES.has(status)) {
+    return res.status(400).json({ message: "Invalid client status" });
+  }
+
+  const user = await User.findOneAndUpdate(
+    { _id: req.params.id, role: "customer" },
+    { $set: { "customerProfile.clientStatus": status } },
+    { returnDocument: "after", runValidators: true }
+  ).select("name email customerProfile createdAt updatedAt");
+
+  if (!user) return res.status(404).json({ message: "Customer not found" });
+
+  res.json({
+    ...user.toObject(),
+    selectedPackages: cleanCustomerPackages(user.customerProfile?.selectedPackages),
+    clientStatus: user.customerProfile?.clientStatus || "active",
+  });
 });
 
 router.patch("/customer-requests/:id/domain-available", protect, adminOnly, async (req, res) => {

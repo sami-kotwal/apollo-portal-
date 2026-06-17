@@ -94,6 +94,23 @@ const userSchema = new mongoose.Schema(
         type: [mongoose.Schema.Types.Mixed],
         default: [],
       },
+      clientStatus: {
+        type: String,
+        enum: ["active", "retention", "payment_due", "upsell"],
+        default: "active",
+      },
+      profileImage: {
+        type: String,
+        default: "",
+      },
+      screenshotImage: {
+        type: String,
+        default: "",
+      },
+      callRecordingLinks: {
+        type: [String],
+        default: [],
+      },
     },
   },
   { timestamps: true }
