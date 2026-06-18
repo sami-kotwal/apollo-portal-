@@ -99,6 +99,11 @@ const userSchema = new mongoose.Schema(
         enum: ["active", "retention", "payment_due", "upsell"],
         default: "active",
       },
+      trackingStatusColor: {
+        type: String,
+        enum: ["", "green", "yellow", "red"],
+        default: "",
+      },
       profileImage: {
         type: String,
         default: "",

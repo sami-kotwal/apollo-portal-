@@ -25,6 +25,19 @@ const CLIENT_STATUS_TONES = {
   upsell: "border-purple-500/30 bg-purple-500/10 text-purple-300",
 };
 
+const TRACKING_STATUS_OPTIONS = [
+  { value: "", label: "Select option" },
+  { value: "green", label: "Green" },
+  { value: "yellow", label: "Yellow" },
+  { value: "red", label: "Red" },
+];
+
+const TRACKING_STATUS_DOTS = {
+  green: "bg-emerald-400",
+  yellow: "bg-yellow-400",
+  red: "bg-red-500",
+};
+
 const getPackageId = (item) => (typeof item === "string" ? item : item?.packageId || item?.id || "");
 const getStatusLabel = (status) => CLIENT_STATUS_OPTIONS.find((item) => item.value === status)?.label || "Active Clients";
 const getCustomerScreenshots = (profile = {}) => {
@@ -69,6 +82,7 @@ function PMClientList() {
   const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
   const [statusDrafts, setStatusDrafts] = useState({});
+  const [trackingDrafts, setTrackingDrafts] = useState({});
   const [activeFilter, setActiveFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -87,6 +101,12 @@ function PMClientList() {
       setStatusDrafts(
         rows.reduce((acc, customer) => {
           acc[customer._id] = customer.clientStatus || "active";
+          return acc;
+        }, {})
+      );
+      setTrackingDrafts(
+        rows.reduce((acc, customer) => {
+          acc[customer._id] = customer.trackingStatusColor || customer.customerProfile?.trackingStatusColor || "";
           return acc;
         }, {})
       );
@@ -131,12 +151,16 @@ function PMClientList() {
 
   const saveClientStatus = async (customerId) => {
     const status = statusDrafts[customerId] || "active";
+    const trackingStatusColor = trackingDrafts[customerId] || "";
     setSavingId(customerId);
     setMessage("");
     setError("");
 
     try {
-      await API.patch(`/users/customers/${customerId}/client-status`, { status });
+      await API.patch(`/users/customers/${customerId}/client-status`, {
+        status,
+        trackingStatusColor,
+      });
       setCustomers((current) =>
         current.map((customer) =>
           customer._id === customerId
@@ -146,7 +170,9 @@ function PMClientList() {
                 customerProfile: {
                   ...(customer.customerProfile || {}),
                   clientStatus: status,
+                  trackingStatusColor,
                 },
+                trackingStatusColor,
               }
             : customer
         )
@@ -164,7 +190,7 @@ function PMClientList() {
       <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-4xl font-bold text-white mb-2">Client List</h1>
-          <p className="text-slate-400">PM client status, selected packages, and request activity.</p>
+          <p className="text-slate-400">PM client status, tracking color, and account activity.</p>
         </div>
         <label className="relative block w-full lg:max-w-md">
           <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
@@ -228,7 +254,7 @@ function PMClientList() {
                 <th className="px-4 py-3 font-semibold">Client</th>
                 <th className="px-4 py-3 font-semibold">Company</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
-                <th className="px-4 py-3 font-semibold">Packages</th>
+                <th className="px-4 py-3 font-semibold">Tracking Status Color</th>
                 <th className="px-4 py-3 font-semibold">Actions</th>
               </tr>
             </thead>
@@ -251,7 +277,11 @@ function PMClientList() {
                 filteredCustomers.map((customer) => {
                   const currentStatus = customer.clientStatus || "active";
                   const draftStatus = statusDrafts[customer._id] || currentStatus;
-                  const statusChanged = draftStatus !== currentStatus;
+                  const currentTrackingStatus =
+                    customer.trackingStatusColor || customer.customerProfile?.trackingStatusColor || "";
+                  const draftTrackingStatus = trackingDrafts[customer._id] ?? currentTrackingStatus;
+                  const statusChanged =
+                    draftStatus !== currentStatus || draftTrackingStatus !== currentTrackingStatus;
 
                   return (
                     <tr key={customer._id} className="text-slate-300 transition hover:bg-slate-800/50">
@@ -266,23 +296,29 @@ function PMClientList() {
                         </span>
                       </td>
                       <td className="px-4 py-4">
-                        {customer.selectedPackages?.length ? (
-                          <div className="flex max-w-xs flex-wrap gap-1.5">
-                            {customer.selectedPackages.map((item, index) => {
-                              const packageId = getPackageId(item);
-                              const billingCycle = typeof item === "string" ? "" : item?.billingCycle || "";
-                              const price = typeof item === "string" ? "" : item?.price || "";
-                              return (
-                                <span key={`${packageId}-${billingCycle || "legacy"}-${index}`} className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-semibold text-blue-200">
-                                  {packageId.replaceAll("-", " ")}
-                                  {billingCycle && <span className="text-blue-300"> - {billingCycle.replace("_", " ")} {price && `(${price})`}</span>}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <span className="text-slate-500">None selected</span>
-                        )}
+                        <div className="flex min-w-44 items-center gap-2">
+                          <span
+                            className={`h-3 w-3 shrink-0 rounded-full border border-white/20 ${
+                              TRACKING_STATUS_DOTS[draftTrackingStatus] || "bg-slate-700"
+                            }`}
+                          />
+                          <select
+                            value={draftTrackingStatus}
+                            onChange={(event) =>
+                              setTrackingDrafts((current) => ({
+                                ...current,
+                                [customer._id]: event.target.value,
+                              }))
+                            }
+                            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
+                          >
+                            {TRACKING_STATUS_OPTIONS.map((option) => (
+                              <option key={option.value || "default"} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </td>
                       <td className="px-4 py-4">
                         <div className="flex min-w-72 items-center gap-2">

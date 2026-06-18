@@ -54,6 +54,7 @@ const VALID_CUSTOMER_PACKAGE_IDS = new Set([
   "branding-design",
 ]);
 const VALID_CLIENT_STATUSES = new Set(["active", "retention", "payment_due", "upsell"]);
+const VALID_TRACKING_STATUS_COLORS = new Set(["", "green", "yellow", "red"]);
 const getCustomerPackageId = (item) => (typeof item === "string" ? item : item?.packageId || item?.id || "");
 const cleanCustomerPackages = (packages = []) =>
   Array.isArray(packages)
@@ -82,6 +83,7 @@ const getCustomerPayload = async (customerId) => {
     ...customer,
     selectedPackages: cleanCustomerPackages(customer.customerProfile?.selectedPackages),
     clientStatus: customer.customerProfile?.clientStatus || "active",
+    trackingStatusColor: customer.customerProfile?.trackingStatusColor || "",
     totalRequests: requests.length,
     openRequests: requests.filter((item) => !["completed", "closed"].includes(item.status)).length,
     latestRequestAt,
@@ -236,6 +238,7 @@ router.get("/customers", protect, adminOrPmOnly, async (req, res) => {
         ...customer,
         selectedPackages: cleanCustomerPackages(customer.customerProfile?.selectedPackages),
         clientStatus: customer.customerProfile?.clientStatus || "active",
+        trackingStatusColor: customer.customerProfile?.trackingStatusColor || "",
         totalRequests: stats.totalRequests || 0,
         openRequests: stats.openRequests || 0,
         latestRequestAt: stats.latestRequestAt || null,
@@ -295,14 +298,23 @@ router.patch("/customers/:id/profile", protect, adminOrPmOnly, async (req, res) 
 
 router.patch("/customers/:id/client-status", protect, adminOrPmOnly, async (req, res) => {
   const status = String(req.body?.status || "").trim();
+  const trackingStatusColor = String(req.body?.trackingStatusColor || "").trim().toLowerCase();
 
   if (!VALID_CLIENT_STATUSES.has(status)) {
     return res.status(400).json({ message: "Invalid client status" });
   }
+  if (!VALID_TRACKING_STATUS_COLORS.has(trackingStatusColor)) {
+    return res.status(400).json({ message: "Invalid tracking status color" });
+  }
 
   const user = await User.findOneAndUpdate(
     { _id: req.params.id, role: "customer" },
-    { $set: { "customerProfile.clientStatus": status } },
+    {
+      $set: {
+        "customerProfile.clientStatus": status,
+        "customerProfile.trackingStatusColor": trackingStatusColor,
+      },
+    },
     { returnDocument: "after", runValidators: true }
   ).select("name email customerProfile createdAt updatedAt");
 
@@ -312,6 +324,7 @@ router.patch("/customers/:id/client-status", protect, adminOrPmOnly, async (req,
     ...user.toObject(),
     selectedPackages: cleanCustomerPackages(user.customerProfile?.selectedPackages),
     clientStatus: user.customerProfile?.clientStatus || "active",
+    trackingStatusColor: user.customerProfile?.trackingStatusColor || "",
   });
 });
 
