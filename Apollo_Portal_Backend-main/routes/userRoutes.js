@@ -253,7 +253,12 @@ router.get("/customers/:id", protect, adminOrPmOnly, async (req, res) => {
 
 router.patch("/customers/:id/profile", protect, adminOrPmOnly, async (req, res) => {
   const status = cleanText(req.body?.clientStatus || req.body?.status || "active");
-  const screenshotImage = cleanText(req.body?.screenshotImage || req.body?.profileImage);
+  const legacyScreenshot = cleanText(req.body?.screenshotImage || req.body?.profileImage);
+  const screenshots = Array.isArray(req.body?.screenshots)
+    ? req.body.screenshots.map((item) => cleanText(item)).filter(Boolean).slice(0, 8)
+    : legacyScreenshot
+      ? [legacyScreenshot]
+      : [];
   const callRecordingLinks = Array.isArray(req.body?.callRecordingLinks)
     ? req.body.callRecordingLinks.map((item) => cleanText(item)).filter(Boolean).slice(0, 50)
     : [];
@@ -262,7 +267,10 @@ router.patch("/customers/:id/profile", protect, adminOrPmOnly, async (req, res) 
     return res.status(400).json({ message: "Invalid client status" });
   }
 
-  if (screenshotImage && !screenshotImage.startsWith("data:image/") && !/^https?:\/\//i.test(screenshotImage)) {
+  const invalidScreenshot = screenshots.find(
+    (item) => !item.startsWith("data:image/") && !/^https?:\/\//i.test(item)
+  );
+  if (invalidScreenshot) {
     return res.status(400).json({ message: "Screenshot must be an uploaded image or image URL" });
   }
 
@@ -271,7 +279,8 @@ router.patch("/customers/:id/profile", protect, adminOrPmOnly, async (req, res) 
     {
       $set: {
         "customerProfile.clientStatus": status,
-        "customerProfile.screenshotImage": screenshotImage,
+        "customerProfile.screenshots": screenshots,
+        "customerProfile.screenshotImage": screenshots[0] || "",
         "customerProfile.callRecordingLinks": callRecordingLinks,
       },
     },

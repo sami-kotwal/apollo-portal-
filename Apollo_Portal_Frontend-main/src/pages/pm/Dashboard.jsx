@@ -1,6 +1,6 @@
 import { Routes, Route, useNavigate, useParams } from "react-router-dom";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ExternalLink, Plus, UploadCloud, X, Link as LinkIcon, Pencil, Send, Trash2 } from "lucide-react";
+import { ArrowLeft, ExternalLink, Maximize2, Plus, Search, UploadCloud, X, Link as LinkIcon, Pencil, Send, Trash2 } from "lucide-react";
 import DashboardLayout from "../../layouts/DashboardLayout";
 import { Input, Button, Textarea, Select, Badge, Alert, Card } from "../../components/FormComponents";
 import API from "../../services/api";
@@ -27,6 +27,11 @@ const CLIENT_STATUS_TONES = {
 
 const getPackageId = (item) => (typeof item === "string" ? item : item?.packageId || item?.id || "");
 const getStatusLabel = (status) => CLIENT_STATUS_OPTIONS.find((item) => item.value === status)?.label || "Active Clients";
+const getCustomerScreenshots = (profile = {}) => {
+  if (Array.isArray(profile.screenshots) && profile.screenshots.length) return profile.screenshots;
+  const legacyScreenshot = profile.screenshotImage || profile.profileImage || "";
+  return legacyScreenshot ? [legacyScreenshot] : [];
+};
 
 function PMHome() {
   const user = getStoredUser();
@@ -65,6 +70,7 @@ function PMClientList() {
   const [customers, setCustomers] = useState([]);
   const [statusDrafts, setStatusDrafts] = useState({});
   const [activeFilter, setActiveFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState("");
   const [message, setMessage] = useState("");
@@ -104,13 +110,24 @@ function PMClientList() {
     [customers]
   );
 
-  const filteredCustomers = useMemo(
-    () =>
-      activeFilter === "all"
-        ? customers
-        : customers.filter((customer) => (customer.clientStatus || "active") === activeFilter),
-    [activeFilter, customers]
-  );
+  const filteredCustomers = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return customers.filter((customer) => {
+      const matchesStatus =
+        activeFilter === "all" || (customer.clientStatus || "active") === activeFilter;
+      const searchableText = [
+        customer.name,
+        customer.email,
+        customer.customerProfile?.companyName,
+        customer.customerProfile?.phone,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return matchesStatus && (!query || searchableText.includes(query));
+    });
+  }, [activeFilter, customers, searchQuery]);
 
   const saveClientStatus = async (customerId) => {
     const status = statusDrafts[customerId] || "active";
@@ -144,9 +161,21 @@ function PMClientList() {
 
   return (
     <div>
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold text-white mb-2">Client List</h1>
-        <p className="text-slate-400">PM client status, selected packages, and request activity.</p>
+      <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h1 className="text-4xl font-bold text-white mb-2">Client List</h1>
+          <p className="text-slate-400">PM client status, selected packages, and request activity.</p>
+        </div>
+        <label className="relative block w-full lg:max-w-md">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search client by name, email, company, or phone"
+            className="w-full rounded-lg border border-slate-700 bg-slate-900 py-3 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-500"
+          />
+        </label>
       </div>
 
       {(message || error) && (
@@ -161,7 +190,19 @@ function PMClientList() {
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <button
+          type="button"
+          onClick={() => setActiveFilter("all")}
+          className={`rounded-xl border p-5 text-left transition ${
+            activeFilter === "all"
+              ? "border-blue-500 bg-blue-500/10"
+              : "border-slate-800 bg-slate-900/80 hover:border-slate-700 hover:bg-slate-900"
+          }`}
+        >
+          <p className="text-sm text-slate-400">Total Customers</p>
+          <p className="mt-2 text-3xl font-bold text-white">{customers.length}</p>
+        </button>
         {CLIENT_STATUS_OPTIONS.map((option) => (
           <button
             key={option.value}
@@ -175,34 +216,6 @@ function PMClientList() {
           >
             <p className="text-sm text-slate-400">{option.label}</p>
             <p className="mt-2 text-3xl font-bold text-white">{statusCounts[option.value] || 0}</p>
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-5 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setActiveFilter("all")}
-          className={`rounded-lg border px-4 py-2 text-sm font-semibold transition ${
-            activeFilter === "all"
-              ? "border-blue-500 bg-blue-600 text-white"
-              : "border-slate-700 bg-slate-900 text-slate-300 hover:border-blue-500/50 hover:text-white"
-          }`}
-        >
-          All Clients
-        </button>
-        {CLIENT_STATUS_OPTIONS.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => setActiveFilter(option.value)}
-            className={`rounded-lg border px-4 py-2 text-sm font-semibold transition ${
-              activeFilter === option.value
-                ? "border-blue-500 bg-blue-600 text-white"
-                : "border-slate-700 bg-slate-900 text-slate-300 hover:border-blue-500/50 hover:text-white"
-            }`}
-          >
-            {option.label}
           </button>
         ))}
       </div>
@@ -230,7 +243,7 @@ function PMClientList() {
               {!loading && filteredCustomers.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
-                    No clients found in this status.
+                    No clients match the selected status or search.
                   </td>
                 </tr>
               )}
@@ -323,9 +336,10 @@ function PMClientDetails() {
   const [customer, setCustomer] = useState(null);
   const [form, setForm] = useState({
     clientStatus: "active",
-    screenshotImage: "",
+    screenshots: [],
     callRecordingLinks: [],
   });
+  const [previewImage, setPreviewImage] = useState("");
   const [recordingInput, setRecordingInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -342,7 +356,7 @@ function PMClientDetails() {
       setCustomer(profile);
       setForm({
         clientStatus: profile.clientStatus || "active",
-        screenshotImage: profile.customerProfile?.screenshotImage || profile.customerProfile?.profileImage || "",
+        screenshots: getCustomerScreenshots(profile.customerProfile),
         callRecordingLinks: profile.customerProfile?.callRecordingLinks || [],
       });
     } catch (err) {
@@ -357,25 +371,63 @@ function PMClientDetails() {
   }, [loadCustomer]);
 
   const handleImageUpload = (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!files.length) return;
 
-    if (!file.type.startsWith("image/")) {
-      setError("Please upload an image file.");
+    if (form.screenshots.length + files.length > 8) {
+      setError("A maximum of 8 screenshots can be attached.");
       return;
     }
 
-    if (file.size > 2 * 1024 * 1024) {
-      setError("Image must be 2 MB or smaller.");
+    if (files.some((file) => !file.type.startsWith("image/"))) {
+      setError("Please upload image files only.");
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
+    if (files.some((file) => file.size > 1024 * 1024)) {
+      setError("Each screenshot must be 1 MB or smaller.");
+      return;
+    }
+
+    Promise.all(
+      files.map(
+        (file) =>
+          new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result || "");
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          })
+      )
+    )
+      .then((images) => {
+        setForm((current) => ({
+          ...current,
+          screenshots: [...current.screenshots, ...images.filter(Boolean)].slice(0, 8),
+        }));
+        setError("");
+      })
+      .catch(() => {
+        setError("Could not read the selected screenshots.");
+      });
+  };
+
+  const removeScreenshot = (index) => {
+    setForm((current) => ({
+      ...current,
+      screenshots: current.screenshots.filter((_, itemIndex) => itemIndex !== index),
+    }));
+    if (previewImage === form.screenshots[index]) {
+      setPreviewImage("");
+    }
+  };
+
+  const openScreenshot = (image) => {
+    if (image) {
       setError("");
-      setForm((current) => ({ ...current, screenshotImage: reader.result || "" }));
-    };
-    reader.readAsDataURL(file);
+      setPreviewImage(image);
+    }
   };
 
   const addRecordingLink = () => {
@@ -407,7 +459,7 @@ function PMClientDetails() {
       setCustomer(profile);
       setForm({
         clientStatus: profile.clientStatus || "active",
-        screenshotImage: profile.customerProfile?.screenshotImage || profile.customerProfile?.profileImage || "",
+        screenshots: getCustomerScreenshots(profile.customerProfile),
         callRecordingLinks: profile.customerProfile?.callRecordingLinks || [],
       });
       setMessage("Client profile updated successfully.");
@@ -464,27 +516,49 @@ function PMClientDetails() {
         <div className="space-y-6">
           <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
             <section className="rounded-xl border border-slate-800 bg-slate-900/80 p-6">
-              <div className="flex flex-col items-center text-center">
-                <div className="flex h-36 w-36 items-center justify-center overflow-hidden rounded-xl border border-slate-700 bg-slate-950">
-                  {form.screenshotImage ? (
-                    <img src={form.screenshotImage} alt="Client screenshot" className="h-full w-full object-cover" />
-                  ) : (
-                    <span className="text-sm font-semibold text-slate-500">No screenshot</span>
-                  )}
+              <div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-xl font-bold text-white">Screenshots</h2>
+                    <p className="mt-1 text-sm text-slate-400">{form.screenshots.length} of 8 attached</p>
+                  </div>
+                  <label className="inline-flex w-fit cursor-pointer items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-sm font-semibold text-blue-200 transition hover:bg-blue-500/20 hover:text-white">
+                    <UploadCloud className="h-4 w-4" />
+                    Add Screenshots
+                    <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden" />
+                  </label>
                 </div>
-                <label className="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-sm font-semibold text-blue-200 transition hover:bg-blue-500/20 hover:text-white">
-                  <UploadCloud className="h-4 w-4" />
-                  Upload Screenshot
-                  <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-                </label>
-                {form.screenshotImage && (
-                  <button
-                    type="button"
-                    onClick={() => setForm((current) => ({ ...current, screenshotImage: "" }))}
-                    className="mt-2 text-sm font-semibold text-slate-400 hover:text-white"
-                  >
-                    Remove screenshot
-                  </button>
+
+                {form.screenshots.length ? (
+                  <div className="mt-5 grid grid-cols-2 gap-3">
+                    {form.screenshots.map((image, index) => (
+                      <div key={`${image.slice(0, 40)}-${index}`} className="group relative aspect-video overflow-hidden rounded-lg border border-slate-700 bg-slate-950">
+                        <button
+                          type="button"
+                          onClick={() => openScreenshot(image)}
+                          className="h-full w-full"
+                          title={`Open screenshot ${index + 1}`}
+                        >
+                          <img src={image} alt={`Client screenshot ${index + 1}`} className="h-full w-full object-cover" />
+                          <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-transparent transition group-hover:bg-black/55 group-hover:text-white">
+                            <Maximize2 className="h-6 w-6" />
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeScreenshot(index)}
+                          className="absolute right-2 top-2 rounded-md border border-red-400/40 bg-slate-950/90 p-1.5 text-red-200 transition hover:bg-red-500 hover:text-white"
+                          title="Remove screenshot"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-5 flex aspect-video items-center justify-center rounded-lg border border-dashed border-slate-700 bg-slate-950/50 text-sm font-semibold text-slate-500">
+                    No screenshots attached
+                  </div>
                 )}
               </div>
             </section>
@@ -641,6 +715,32 @@ function PMClientDetails() {
               </table>
             </div>
           </section>
+        </div>
+      )}
+
+      {previewImage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4">
+          <button
+            type="button"
+            aria-label="Close screenshot preview"
+            onClick={() => setPreviewImage("")}
+            className="absolute inset-0"
+          />
+          <div className="relative z-10 max-h-[92vh] max-w-[94vw]">
+            <img
+              src={previewImage}
+              alt="Full client screenshot"
+              className="max-h-[92vh] max-w-[94vw] rounded-lg border border-slate-700 bg-slate-950 object-contain shadow-2xl"
+            />
+            <button
+              type="button"
+              onClick={() => setPreviewImage("")}
+              className="absolute right-3 top-3 rounded-lg border border-slate-600 bg-slate-950/90 p-2 text-white transition hover:bg-slate-800"
+              title="Close preview"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
       )}
     </div>

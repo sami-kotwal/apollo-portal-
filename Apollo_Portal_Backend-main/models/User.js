@@ -107,6 +107,10 @@ const userSchema = new mongoose.Schema(
         type: String,
         default: "",
       },
+      screenshots: {
+        type: [String],
+        default: [],
+      },
       callRecordingLinks: {
         type: [String],
         default: [],

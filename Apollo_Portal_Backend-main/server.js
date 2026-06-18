@@ -89,7 +89,7 @@ app.use(cors({
   credentials: true,
 }));
 
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json({ limit: "15mb" }));
 
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
