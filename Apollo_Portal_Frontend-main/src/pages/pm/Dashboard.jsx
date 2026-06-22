@@ -25,6 +25,39 @@ const CLIENT_STATUS_TONES = {
   upsell: "border-purple-500/30 bg-purple-500/10 text-purple-300",
 };
 
+const CLIENT_STATUS_CARD_TONES = {
+  all: {
+    card: "border-cyan-400/30 from-cyan-500/15 via-slate-900/95 to-slate-950 hover:border-cyan-400/60",
+    accent: "bg-cyan-400",
+    glow: "bg-cyan-400/15",
+    value: "text-cyan-100",
+  },
+  active: {
+    card: "border-emerald-400/25 from-emerald-500/12 via-slate-900/95 to-slate-950 hover:border-emerald-400/55",
+    accent: "bg-emerald-400",
+    glow: "bg-emerald-400/15",
+    value: "text-emerald-100",
+  },
+  retention: {
+    card: "border-blue-400/25 from-blue-500/15 via-slate-900/95 to-slate-950 hover:border-blue-400/55",
+    accent: "bg-blue-400",
+    glow: "bg-blue-400/15",
+    value: "text-blue-100",
+  },
+  payment_due: {
+    card: "border-amber-400/25 from-amber-500/15 via-slate-900/95 to-slate-950 hover:border-amber-400/55",
+    accent: "bg-amber-400",
+    glow: "bg-amber-400/15",
+    value: "text-amber-100",
+  },
+  upsell: {
+    card: "border-purple-400/25 from-purple-500/15 via-slate-900/95 to-slate-950 hover:border-purple-400/55",
+    accent: "bg-purple-400",
+    glow: "bg-purple-400/15",
+    value: "text-purple-100",
+  },
+};
+
 const TRACKING_STATUS_OPTIONS = [
   { value: "", label: "Select option" },
   { value: "green", label: "Green" },
@@ -38,8 +71,41 @@ const TRACKING_STATUS_DOTS = {
   red: "bg-red-500",
 };
 
+const PAYMENT_STATUS_OPTIONS = [
+  { value: "", label: "Select option" },
+  { value: "pending", label: "Pending" },
+  { value: "payment_due", label: "Payment Due" },
+  { value: "follow_up", label: "Follow-up" },
+  { value: "collected", label: "Collected" },
+];
+
+const PAYMENT_STATUS_TONES = {
+  pending: {
+    card: "border-slate-600/40 from-slate-500/10 via-slate-900/95 to-slate-950",
+    accent: "bg-slate-400",
+    value: "text-slate-100",
+  },
+  payment_due: {
+    card: "border-orange-400/30 from-orange-500/15 via-slate-900/95 to-slate-950",
+    accent: "bg-orange-400",
+    value: "text-orange-100",
+  },
+  follow_up: {
+    card: "border-sky-400/30 from-sky-500/15 via-slate-900/95 to-slate-950",
+    accent: "bg-sky-400",
+    value: "text-sky-100",
+  },
+  collected: {
+    card: "border-teal-400/30 from-teal-500/15 via-slate-900/95 to-slate-950",
+    accent: "bg-teal-400",
+    value: "text-teal-100",
+  },
+};
+
 const getPackageId = (item) => (typeof item === "string" ? item : item?.packageId || item?.id || "");
 const getStatusLabel = (status) => CLIENT_STATUS_OPTIONS.find((item) => item.value === status)?.label || "Active Clients";
+const getPaymentStatusLabel = (status) =>
+  PAYMENT_STATUS_OPTIONS.find((item) => item.value === status)?.label || "Select option";
 const getCustomerScreenshots = (profile = {}) => {
   if (Array.isArray(profile.screenshots) && profile.screenshots.length) return profile.screenshots;
   const legacyScreenshot = profile.screenshotImage || profile.profileImage || "";
@@ -83,7 +149,10 @@ function PMClientList() {
   const [customers, setCustomers] = useState([]);
   const [statusDrafts, setStatusDrafts] = useState({});
   const [trackingDrafts, setTrackingDrafts] = useState({});
+  const [paymentDateDrafts, setPaymentDateDrafts] = useState({});
+  const [paymentStatusDrafts, setPaymentStatusDrafts] = useState({});
   const [activeFilter, setActiveFilter] = useState("all");
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState("");
@@ -110,6 +179,18 @@ function PMClientList() {
           return acc;
         }, {})
       );
+      setPaymentDateDrafts(
+        rows.reduce((acc, customer) => {
+          acc[customer._id] = customer.paymentReceiveDate || customer.customerProfile?.paymentReceiveDate || "";
+          return acc;
+        }, {})
+      );
+      setPaymentStatusDrafts(
+        rows.reduce((acc, customer) => {
+          acc[customer._id] = customer.paymentStatus || customer.customerProfile?.paymentStatus || "";
+          return acc;
+        }, {})
+      );
     } catch (err) {
       setError(err.response?.data?.message || "Could not load client list");
     } finally {
@@ -130,11 +211,39 @@ function PMClientList() {
     [customers]
   );
 
+  const paymentStatusCounts = useMemo(
+    () =>
+      PAYMENT_STATUS_OPTIONS.filter((option) => option.value).reduce((acc, option) => {
+        acc[option.value] = customers.filter(
+          (customer) =>
+            (customer.paymentStatus || customer.customerProfile?.paymentStatus || "") === option.value
+        ).length;
+        return acc;
+      }, {}),
+    [customers]
+  );
+
+  const trackingStatusCounts = useMemo(
+    () =>
+      ["green", "yellow", "red"].reduce((acc, color) => {
+        acc[color] = customers.filter(
+          (customer) =>
+            (customer.trackingStatusColor || customer.customerProfile?.trackingStatusColor || "") === color
+        ).length;
+        return acc;
+      }, {}),
+    [customers]
+  );
+
   const filteredCustomers = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return customers.filter((customer) => {
       const matchesStatus =
         activeFilter === "all" || (customer.clientStatus || "active") === activeFilter;
+      const customerPaymentStatus =
+        customer.paymentStatus || customer.customerProfile?.paymentStatus || "";
+      const matchesPaymentStatus =
+        paymentStatusFilter === "all" || customerPaymentStatus === paymentStatusFilter;
       const searchableText = [
         customer.name,
         customer.email,
@@ -145,13 +254,30 @@ function PMClientList() {
         .join(" ")
         .toLowerCase();
 
-      return matchesStatus && (!query || searchableText.includes(query));
+      return (
+        matchesStatus &&
+        matchesPaymentStatus &&
+        (!query || searchableText.includes(query))
+      );
     });
-  }, [activeFilter, customers, searchQuery]);
+  }, [activeFilter, customers, paymentStatusFilter, searchQuery]);
+
+  const clearTableFilters = () => {
+    setSearchQuery("");
+    setActiveFilter("all");
+    setPaymentStatusFilter("all");
+  };
+
+  const hasTableFilters =
+    Boolean(searchQuery.trim()) ||
+    activeFilter !== "all" ||
+    paymentStatusFilter !== "all";
 
   const saveClientStatus = async (customerId) => {
     const status = statusDrafts[customerId] || "active";
     const trackingStatusColor = trackingDrafts[customerId] || "";
+    const paymentReceiveDate = paymentDateDrafts[customerId] || "";
+    const paymentStatus = paymentStatusDrafts[customerId] || "";
     setSavingId(customerId);
     setMessage("");
     setError("");
@@ -160,6 +286,8 @@ function PMClientList() {
       await API.patch(`/users/customers/${customerId}/client-status`, {
         status,
         trackingStatusColor,
+        paymentReceiveDate,
+        paymentStatus,
       });
       setCustomers((current) =>
         current.map((customer) =>
@@ -173,6 +301,8 @@ function PMClientList() {
                   trackingStatusColor,
                 },
                 trackingStatusColor,
+                paymentReceiveDate,
+                paymentStatus,
               }
             : customer
         )
@@ -216,59 +346,184 @@ function PMClientList() {
         </div>
       )}
 
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-white">Client Overview</h2>
+          <p className="text-xs text-slate-500">Clients grouped by account status</p>
+        </div>
+      </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <button
           type="button"
           onClick={() => setActiveFilter("all")}
-          className={`rounded-xl border p-5 text-left transition ${
+          className={`group relative overflow-hidden rounded-2xl border bg-gradient-to-br p-5 text-left shadow-lg shadow-black/10 transition duration-300 hover:-translate-y-1 hover:shadow-xl ${
             activeFilter === "all"
-              ? "border-blue-500 bg-blue-500/10"
-              : "border-slate-800 bg-slate-900/80 hover:border-slate-700 hover:bg-slate-900"
-          }`}
+              ? "ring-2 ring-cyan-400/40"
+              : ""
+          } ${CLIENT_STATUS_CARD_TONES.all.card}`}
         >
-          <p className="text-sm text-slate-400">Total Customers</p>
-          <p className="mt-2 text-3xl font-bold text-white">{customers.length}</p>
+          <span className={`absolute inset-x-0 top-0 h-0.5 ${CLIENT_STATUS_CARD_TONES.all.accent}`} />
+          <span className={`absolute -right-8 -top-8 h-24 w-24 rounded-full blur-2xl ${CLIENT_STATUS_CARD_TONES.all.glow}`} />
+          <div className="relative">
+            <div className="flex items-center gap-2">
+              <span className={`h-2.5 w-2.5 rounded-full ${CLIENT_STATUS_CARD_TONES.all.accent}`} />
+              <p className="text-sm font-medium text-slate-300">Total Customers</p>
+            </div>
+            <p className={`mt-3 text-3xl font-extrabold tracking-tight ${CLIENT_STATUS_CARD_TONES.all.value}`}>
+              {customers.length}
+            </p>
+          </div>
         </button>
-        {CLIENT_STATUS_OPTIONS.map((option) => (
-          <button
+        {CLIENT_STATUS_OPTIONS.map((option) => {
+          const tone = CLIENT_STATUS_CARD_TONES[option.value];
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => setActiveFilter(option.value)}
+              className={`group relative overflow-hidden rounded-2xl border bg-gradient-to-br p-5 text-left shadow-lg shadow-black/10 transition duration-300 hover:-translate-y-1 hover:shadow-xl ${
+                activeFilter === option.value ? "ring-2 ring-blue-400/40" : ""
+              } ${tone.card}`}
+            >
+              <span className={`absolute inset-x-0 top-0 h-0.5 ${tone.accent}`} />
+              <span className={`absolute -right-8 -top-8 h-24 w-24 rounded-full blur-2xl ${tone.glow}`} />
+              <div className="relative">
+                <div className="flex items-center gap-2">
+                  <span className={`h-2.5 w-2.5 rounded-full ${tone.accent}`} />
+                  <p className="text-sm font-medium text-slate-300">{option.label}</p>
+                </div>
+                <p className={`mt-3 text-3xl font-extrabold tracking-tight ${tone.value}`}>
+                  {statusCounts[option.value] || 0}
+                </p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mb-3 mt-7">
+        <h2 className="text-lg font-bold text-white">Payment Overview</h2>
+        <p className="text-xs text-slate-500">Current payment follow-up progress</p>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {PAYMENT_STATUS_OPTIONS.filter((option) => option.value).map((option, index) => {
+          const tone = PAYMENT_STATUS_TONES[option.value];
+          return (
+            <div
+              key={option.value}
+              className={`relative overflow-hidden rounded-2xl border bg-gradient-to-br p-5 shadow-lg shadow-black/10 transition duration-300 hover:-translate-y-1 hover:border-opacity-70 ${tone.card}`}
+            >
+              <span className={`absolute inset-x-0 top-0 h-0.5 ${tone.accent}`} />
+              <div className="relative flex items-end justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className={`h-2.5 w-2.5 rounded-full ${tone.accent}`} />
+                    <p className="text-sm font-medium text-slate-300">{option.label}</p>
+                  </div>
+                  <p className={`mt-3 text-3xl font-extrabold tracking-tight ${tone.value}`}>
+                    {paymentStatusCounts[option.value] || 0}
+                  </p>
+                </div>
+                <span className="text-4xl font-black text-white/[0.04]">0{index + 1}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mb-3 mt-7">
+        <h2 className="text-lg font-bold text-white">Tracking Overview</h2>
+        <p className="text-xs text-slate-500">Client health at a glance</p>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-3">
+        {TRACKING_STATUS_OPTIONS.filter((option) => option.value).map((option) => (
+          <div
             key={option.value}
-            type="button"
-            onClick={() => setActiveFilter(option.value)}
-            className={`rounded-xl border p-5 text-left transition ${
-              activeFilter === option.value
-                ? "border-blue-500 bg-blue-500/10"
-                : "border-slate-800 bg-slate-900/80 hover:border-slate-700 hover:bg-slate-900"
-            }`}
+            className="group relative overflow-hidden rounded-2xl border border-slate-700/70 bg-gradient-to-br from-slate-800/90 via-slate-900/95 to-slate-950 p-5 shadow-lg shadow-black/10 transition duration-300 hover:-translate-y-1 hover:border-slate-500"
           >
-            <p className="text-sm text-slate-400">{option.label}</p>
-            <p className="mt-2 text-3xl font-bold text-white">{statusCounts[option.value] || 0}</p>
-          </button>
+            <span className={`absolute inset-y-0 left-0 w-1 ${TRACKING_STATUS_DOTS[option.value]}`} />
+            <span className={`absolute -right-8 -top-8 h-24 w-24 rounded-full opacity-10 blur-2xl ${TRACKING_STATUS_DOTS[option.value]}`} />
+            <div className="relative flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className={`h-3 w-3 rounded-full shadow-lg ${TRACKING_STATUS_DOTS[option.value]}`} />
+                  <p className="text-sm font-semibold text-slate-300">{option.label}</p>
+                </div>
+                <p className="mt-3 text-3xl font-extrabold tracking-tight text-white">
+                  {trackingStatusCounts[option.value] || 0}
+                </p>
+              </div>
+              <div className={`h-12 w-12 rounded-full border border-white/10 opacity-20 ${TRACKING_STATUS_DOTS[option.value]}`} />
+            </div>
+          </div>
         ))}
       </div>
 
       <div className="mt-6 overflow-hidden rounded-xl border border-slate-800 bg-slate-900/80">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
+        <div className="grid gap-3 border-b border-slate-800 bg-slate-950/40 p-4 md:grid-cols-[1.5fr_1fr_auto]">
+          <label className="relative block">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Filter client..."
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 py-2.5 pl-9 pr-3 text-xs text-white outline-none transition placeholder:text-slate-500 focus:border-blue-500"
+            />
+          </label>
+          <select
+            value={paymentStatusFilter}
+            onChange={(event) => setPaymentStatusFilter(event.target.value)}
+            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-xs text-white outline-none transition focus:border-blue-500"
+          >
+            <option value="all">All Payment Statuses</option>
+            <option value="">Select option</option>
+            {PAYMENT_STATUS_OPTIONS.filter((option) => option.value).map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={clearTableFilters}
+            disabled={!hasTableFilters}
+            className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-2.5 text-xs font-semibold text-slate-200 transition hover:border-red-400/50 hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Clear Filters
+          </button>
+        </div>
+        <div className="w-full overflow-hidden">
+          <table className="w-full table-fixed text-left text-sm">
+            <colgroup>
+              <col className="w-[18%]" />
+              <col className="w-[14%]" />
+              <col className="w-[19%]" />
+              <col className="w-[18%]" />
+              <col className="w-[17%]" />
+              <col className="w-[14%]" />
+            </colgroup>
             <thead className="border-b border-slate-800 bg-slate-950/60 text-slate-400">
               <tr>
-                <th className="px-4 py-3 font-semibold">Client</th>
-                <th className="px-4 py-3 font-semibold">Company</th>
-                <th className="px-4 py-3 font-semibold">Status</th>
-                <th className="px-4 py-3 font-semibold">Tracking Status Color</th>
-                <th className="px-4 py-3 font-semibold">Actions</th>
+                <th className="px-3 py-3 font-semibold">Client</th>
+                <th className="px-3 py-3 font-semibold">Status</th>
+                <th className="px-3 py-3 font-semibold">Client List</th>
+                <th className="px-3 py-3 font-semibold leading-tight">Payment Receive Date</th>
+                <th className="px-3 py-3 font-semibold leading-tight">Payment Status</th>
+                <th className="px-3 py-3 text-center font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
               {loading && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                     Loading clients...
                   </td>
                 </tr>
               )}
               {!loading && filteredCustomers.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                     No clients match the selected status or search.
                   </td>
                 </tr>
@@ -280,76 +535,94 @@ function PMClientList() {
                   const currentTrackingStatus =
                     customer.trackingStatusColor || customer.customerProfile?.trackingStatusColor || "";
                   const draftTrackingStatus = trackingDrafts[customer._id] ?? currentTrackingStatus;
+                  const currentPaymentReceiveDate =
+                    customer.paymentReceiveDate || customer.customerProfile?.paymentReceiveDate || "";
+                  const draftPaymentReceiveDate =
+                    paymentDateDrafts[customer._id] ?? currentPaymentReceiveDate;
+                  const currentPaymentStatus =
+                    customer.paymentStatus || customer.customerProfile?.paymentStatus || "";
+                  const draftPaymentStatus =
+                    paymentStatusDrafts[customer._id] ?? currentPaymentStatus;
                   const statusChanged =
-                    draftStatus !== currentStatus || draftTrackingStatus !== currentTrackingStatus;
+                    draftStatus !== currentStatus ||
+                    draftTrackingStatus !== currentTrackingStatus ||
+                    draftPaymentReceiveDate !== currentPaymentReceiveDate ||
+                    draftPaymentStatus !== currentPaymentStatus;
 
                   return (
                     <tr key={customer._id} className="text-slate-300 transition hover:bg-slate-800/50">
-                      <td className="px-4 py-4">
-                        <p className="font-semibold text-white">{customer.name}</p>
-                        <p className="mt-1 text-xs text-slate-500">{customer.email}</p>
+                      <td className="min-w-0 px-3 py-4">
+                        <p className="truncate font-semibold text-white" title={customer.name}>{customer.name}</p>
+                        <p className="mt-1 truncate text-xs text-slate-500" title={customer.email}>{customer.email}</p>
                       </td>
-                      <td className="px-4 py-4">{customer.customerProfile?.companyName || "Not added"}</td>
-                      <td className="px-4 py-4">
-                        <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${CLIENT_STATUS_TONES[currentStatus] || CLIENT_STATUS_TONES.active}`}>
+                      <td className="min-w-0 px-3 py-4">
+                        <span className={`inline-flex max-w-full rounded-full border px-2.5 py-1 text-[11px] font-bold leading-tight ${CLIENT_STATUS_TONES[currentStatus] || CLIENT_STATUS_TONES.active}`}>
                           {getStatusLabel(currentStatus)}
                         </span>
                       </td>
-                      <td className="px-4 py-4">
-                        <div className="flex min-w-44 items-center gap-2">
-                          <span
-                            className={`h-3 w-3 shrink-0 rounded-full border border-white/20 ${
-                              TRACKING_STATUS_DOTS[draftTrackingStatus] || "bg-slate-700"
-                            }`}
-                          />
-                          <select
-                            value={draftTrackingStatus}
-                            onChange={(event) =>
-                              setTrackingDrafts((current) => ({
-                                ...current,
-                                [customer._id]: event.target.value,
-                              }))
-                            }
-                            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
-                          >
-                            {TRACKING_STATUS_OPTIONS.map((option) => (
-                              <option key={option.value || "default"} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                      <td className="min-w-0 px-3 py-4">
+                        <select
+                          value={draftStatus}
+                          onChange={(event) =>
+                            setStatusDrafts((current) => ({
+                              ...current,
+                              [customer._id]: event.target.value,
+                            }))
+                          }
+                          className="block w-full min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-xs text-white outline-none transition focus:border-blue-500"
+                        >
+                          {CLIENT_STATUS_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
                       </td>
-                      <td className="px-4 py-4">
-                        <div className="flex min-w-72 items-center gap-2">
-                          <select
-                            value={draftStatus}
-                            onChange={(event) =>
-                              setStatusDrafts((current) => ({
-                                ...current,
-                                [customer._id]: event.target.value,
-                              }))
-                            }
-                            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
-                          >
-                            {CLIENT_STATUS_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
+                      <td className="min-w-0 px-3 py-4">
+                        <input
+                          type="date"
+                          value={draftPaymentReceiveDate}
+                          onChange={(event) =>
+                            setPaymentDateDrafts((current) => ({
+                              ...current,
+                              [customer._id]: event.target.value,
+                            }))
+                          }
+                          className="block w-full min-w-0 max-w-full rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-xs text-white outline-none transition [color-scheme:dark] focus:border-blue-500"
+                        />
+                      </td>
+                      <td className="min-w-0 px-3 py-4">
+                        <select
+                          value={draftPaymentStatus}
+                          onChange={(event) =>
+                            setPaymentStatusDrafts((current) => ({
+                              ...current,
+                              [customer._id]: event.target.value,
+                            }))
+                          }
+                          className="block w-full min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-xs text-white outline-none transition focus:border-blue-500"
+                        >
+                          {PAYMENT_STATUS_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="min-w-0 px-3 py-4">
+                        <div className="grid gap-2">
                           <button
                             type="button"
                             disabled={!statusChanged || savingId === customer._id}
                             onClick={() => saveClientStatus(customer._id)}
-                            className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200 transition hover:bg-emerald-500/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                            className="w-full rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-xs font-semibold text-emerald-200 transition hover:bg-emerald-500/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {savingId === customer._id ? "Saving" : "Save"}
                           </button>
                           <button
                             type="button"
                             onClick={() => navigate(`/pm/clients/${customer._id}`)}
-                            className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-200 transition hover:bg-blue-500/20 hover:text-white"
+                            className="w-full rounded-lg border border-blue-500/30 bg-blue-500/10 px-2 py-1.5 text-xs font-semibold text-blue-200 transition hover:bg-blue-500/20 hover:text-white"
                           >
                             Details
                           </button>
@@ -372,6 +645,7 @@ function PMClientDetails() {
   const [customer, setCustomer] = useState(null);
   const [form, setForm] = useState({
     clientStatus: "active",
+    trackingStatusColor: "",
     screenshots: [],
     callRecordingLinks: [],
   });
@@ -392,6 +666,7 @@ function PMClientDetails() {
       setCustomer(profile);
       setForm({
         clientStatus: profile.clientStatus || "active",
+        trackingStatusColor: profile.trackingStatusColor || profile.customerProfile?.trackingStatusColor || "",
         screenshots: getCustomerScreenshots(profile.customerProfile),
         callRecordingLinks: profile.customerProfile?.callRecordingLinks || [],
       });
@@ -495,6 +770,7 @@ function PMClientDetails() {
       setCustomer(profile);
       setForm({
         clientStatus: profile.clientStatus || "active",
+        trackingStatusColor: profile.trackingStatusColor || profile.customerProfile?.trackingStatusColor || "",
         screenshots: getCustomerScreenshots(profile.customerProfile),
         callRecordingLinks: profile.customerProfile?.callRecordingLinks || [],
       });
@@ -627,6 +903,18 @@ function PMClientDetails() {
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Last Request</p>
                   <p className="mt-2 font-semibold text-white">{customer.latestRequestAt ? formatDateOnly(customer.latestRequestAt) : "No requests"}</p>
                 </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Payment Receive Date</p>
+                  <p className="mt-2 font-semibold text-white">
+                    {profile.paymentReceiveDate ? formatDateOnly(profile.paymentReceiveDate) : "Not selected"}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Payment Status</p>
+                  <p className="mt-2 font-semibold text-white">
+                    {getPaymentStatusLabel(profile.paymentStatus || "")}
+                  </p>
+                </div>
               </div>
 
               <label className="mt-5 block">
@@ -643,8 +931,62 @@ function PMClientDetails() {
                   ))}
                 </select>
               </label>
+
+              <label className="mt-5 block">
+                <span className="text-sm font-semibold text-slate-300">Tracking Status</span>
+                <div className="mt-2 flex items-center gap-3">
+                  <span
+                    className={`h-3 w-3 shrink-0 rounded-full border border-white/20 ${
+                      TRACKING_STATUS_DOTS[form.trackingStatusColor] || "bg-slate-700"
+                    }`}
+                  />
+                  <select
+                    value={form.trackingStatusColor}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, trackingStatusColor: event.target.value }))
+                    }
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-blue-500"
+                  >
+                    {TRACKING_STATUS_OPTIONS.map((option) => (
+                      <option key={option.value || "default"} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </label>
             </section>
           </div>
+
+          <section className="rounded-xl border border-slate-800 bg-slate-900/80 p-6">
+            <h2 className="text-xl font-bold text-white">Payment Follow-up History</h2>
+            <p className="mt-1 text-sm text-slate-400">Saved payment changes and automatic reminder activity.</p>
+            {profile.paymentFollowUpHistory?.length ? (
+              <div className="mt-5 space-y-3">
+                {[...profile.paymentFollowUpHistory].reverse().map((item) => (
+                  <div
+                    key={item._id || item.reminderKey}
+                    className="rounded-lg border border-slate-800 bg-slate-950/50 p-4"
+                  >
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="font-semibold text-white">{item.message}</p>
+                      <p className="shrink-0 text-xs text-slate-500">
+                        {item.createdAt ? new Date(item.createdAt).toLocaleString() : ""}
+                      </p>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-400">
+                      Receive date: {item.paymentReceiveDate ? formatDateOnly(item.paymentReceiveDate) : "Not selected"}
+                      {" · "}Status: {getPaymentStatusLabel(item.paymentStatus)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-5 rounded-lg border border-dashed border-slate-700 p-5 text-center text-sm text-slate-500">
+                No payment follow-up activity yet.
+              </p>
+            )}
+          </section>
 
           <section className="rounded-xl border border-slate-800 bg-slate-900/80 p-6">
             <h2 className="text-xl font-bold text-white">Call Recordings</h2>

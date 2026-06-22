@@ -12,6 +12,13 @@ export default function Notifications() {
   const user = getStoredUser();
 
   const getNotificationRoute = (notification) => {
+    if (
+      user?.role === "pm" &&
+      notification.entityType === "system" &&
+      notification.metadata?.customerId
+    ) {
+      return `/pm/clients/${notification.metadata.customerId}`;
+    }
     if (notification.entityType !== "task") return "";
 
     const taskQuery = notification.entityId ? `?task=${notification.entityId}` : "";

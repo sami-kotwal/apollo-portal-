@@ -20,6 +20,7 @@ const customerRoutes = require("./routes/customerRoutes");
 const workCalendarRoutes = require("./routes/workCalendarRoutes");
 const User = require("./models/User");
 const { initSocket } = require("./utils/socket");
+const { startPaymentReminderScheduler } = require("./services/paymentReminderService");
 
 dotenv.config({ path: path.resolve(__dirname, ".env"), quiet: true });
 
@@ -136,6 +137,7 @@ const startServer = async () => {
 
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
+      startPaymentReminderScheduler();
     });
   } catch (error) {
     console.error(error.message);

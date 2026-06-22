@@ -9,6 +9,7 @@ const MonitoringBreak = require("../models/MonitoringBreak");
 const Task = require("../models/Task");
 const CustomerRequest = require("../models/CustomerRequest");
 const { protect } = require("../middleware/authMiddleware");
+const { processPaymentReminders } = require("../services/paymentReminderService");
 const {
   getAttendanceStatusForCalendarDay,
   getCalendarDay,
@@ -55,12 +56,19 @@ const VALID_CUSTOMER_PACKAGE_IDS = new Set([
 ]);
 const VALID_CLIENT_STATUSES = new Set(["active", "retention", "payment_due", "upsell"]);
 const VALID_TRACKING_STATUS_COLORS = new Set(["", "green", "yellow", "red"]);
+const VALID_PAYMENT_STATUSES = new Set(["", "pending", "payment_due", "follow_up", "collected"]);
 const getCustomerPackageId = (item) => (typeof item === "string" ? item : item?.packageId || item?.id || "");
 const cleanCustomerPackages = (packages = []) =>
   Array.isArray(packages)
     ? packages.filter((item) => VALID_CUSTOMER_PACKAGE_IDS.has(getCustomerPackageId(item)))
     : [];
 const cleanText = (value = "") => String(value || "").trim();
+const isValidDateKey = (value) => {
+  if (!value) return true;
+  if (!DATE_KEY_PATTERN.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+};
 const getCustomerPayload = async (customerId) => {
   const [customer, requests] = await Promise.all([
     User.findOne({ _id: customerId, role: "customer" })
@@ -84,6 +92,9 @@ const getCustomerPayload = async (customerId) => {
     selectedPackages: cleanCustomerPackages(customer.customerProfile?.selectedPackages),
     clientStatus: customer.customerProfile?.clientStatus || "active",
     trackingStatusColor: customer.customerProfile?.trackingStatusColor || "",
+    paymentReceiveDate: customer.customerProfile?.paymentReceiveDate || "",
+    paymentStatus: customer.customerProfile?.paymentStatus || "",
+    paymentFollowUpHistory: customer.customerProfile?.paymentFollowUpHistory || [],
     totalRequests: requests.length,
     openRequests: requests.filter((item) => !["completed", "closed"].includes(item.status)).length,
     latestRequestAt,
@@ -239,6 +250,9 @@ router.get("/customers", protect, adminOrPmOnly, async (req, res) => {
         selectedPackages: cleanCustomerPackages(customer.customerProfile?.selectedPackages),
         clientStatus: customer.customerProfile?.clientStatus || "active",
         trackingStatusColor: customer.customerProfile?.trackingStatusColor || "",
+        paymentReceiveDate: customer.customerProfile?.paymentReceiveDate || "",
+        paymentStatus: customer.customerProfile?.paymentStatus || "",
+        paymentFollowUpHistory: customer.customerProfile?.paymentFollowUpHistory || [],
         totalRequests: stats.totalRequests || 0,
         openRequests: stats.openRequests || 0,
         latestRequestAt: stats.latestRequestAt || null,
@@ -256,6 +270,7 @@ router.get("/customers/:id", protect, adminOrPmOnly, async (req, res) => {
 
 router.patch("/customers/:id/profile", protect, adminOrPmOnly, async (req, res) => {
   const status = cleanText(req.body?.clientStatus || req.body?.status || "active");
+  const trackingStatusColor = cleanText(req.body?.trackingStatusColor).toLowerCase();
   const legacyScreenshot = cleanText(req.body?.screenshotImage || req.body?.profileImage);
   const screenshots = Array.isArray(req.body?.screenshots)
     ? req.body.screenshots.map((item) => cleanText(item)).filter(Boolean).slice(0, 8)
@@ -268,6 +283,9 @@ router.patch("/customers/:id/profile", protect, adminOrPmOnly, async (req, res) 
 
   if (!VALID_CLIENT_STATUSES.has(status)) {
     return res.status(400).json({ message: "Invalid client status" });
+  }
+  if (!VALID_TRACKING_STATUS_COLORS.has(trackingStatusColor)) {
+    return res.status(400).json({ message: "Invalid tracking status color" });
   }
 
   const invalidScreenshot = screenshots.find(
@@ -282,6 +300,7 @@ router.patch("/customers/:id/profile", protect, adminOrPmOnly, async (req, res) 
     {
       $set: {
         "customerProfile.clientStatus": status,
+        "customerProfile.trackingStatusColor": trackingStatusColor,
         "customerProfile.screenshots": screenshots,
         "customerProfile.screenshotImage": screenshots[0] || "",
         "customerProfile.callRecordingLinks": callRecordingLinks,
@@ -299,6 +318,8 @@ router.patch("/customers/:id/profile", protect, adminOrPmOnly, async (req, res) 
 router.patch("/customers/:id/client-status", protect, adminOrPmOnly, async (req, res) => {
   const status = String(req.body?.status || "").trim();
   const trackingStatusColor = String(req.body?.trackingStatusColor || "").trim().toLowerCase();
+  const paymentReceiveDate = String(req.body?.paymentReceiveDate || "").trim();
+  const paymentStatus = String(req.body?.paymentStatus || "").trim().toLowerCase();
 
   if (!VALID_CLIENT_STATUSES.has(status)) {
     return res.status(400).json({ message: "Invalid client status" });
@@ -306,25 +327,55 @@ router.patch("/customers/:id/client-status", protect, adminOrPmOnly, async (req,
   if (!VALID_TRACKING_STATUS_COLORS.has(trackingStatusColor)) {
     return res.status(400).json({ message: "Invalid tracking status color" });
   }
+  if (!isValidDateKey(paymentReceiveDate)) {
+    return res.status(400).json({ message: "Invalid payment receive date" });
+  }
+  if (!VALID_PAYMENT_STATUSES.has(paymentStatus)) {
+    return res.status(400).json({ message: "Invalid payment status" });
+  }
 
-  const user = await User.findOneAndUpdate(
-    { _id: req.params.id, role: "customer" },
-    {
-      $set: {
-        "customerProfile.clientStatus": status,
-        "customerProfile.trackingStatusColor": trackingStatusColor,
-      },
-    },
-    { returnDocument: "after", runValidators: true }
-  ).select("name email customerProfile createdAt updatedAt");
+  const user = await User.findOne({ _id: req.params.id, role: "customer" })
+    .select("name email customerProfile createdAt updatedAt");
 
   if (!user) return res.status(404).json({ message: "Customer not found" });
+
+  const previousPaymentReceiveDate = user.customerProfile?.paymentReceiveDate || "";
+  const previousPaymentStatus = user.customerProfile?.paymentStatus || "";
+  const paymentDetailsChanged =
+    previousPaymentReceiveDate !== paymentReceiveDate || previousPaymentStatus !== paymentStatus;
+
+  user.customerProfile.clientStatus = status;
+  user.customerProfile.trackingStatusColor = trackingStatusColor;
+  user.customerProfile.paymentReceiveDate = paymentReceiveDate;
+  user.customerProfile.paymentStatus = paymentStatus;
+
+  if (paymentDetailsChanged) {
+    user.customerProfile.paymentFollowUpHistory.push({
+      reminderKey: `payment_details_updated:${Date.now()}:${req.user.id}`,
+      type: "payment_details_updated",
+      paymentReceiveDate,
+      paymentStatus,
+      message: `Payment details updated: ${paymentReceiveDate || "no date"}, ${paymentStatus || "no status selected"}.`,
+      actor: req.user.id,
+      createdAt: new Date(),
+    });
+    if (user.customerProfile.paymentFollowUpHistory.length > 200) {
+      user.customerProfile.paymentFollowUpHistory =
+        user.customerProfile.paymentFollowUpHistory.slice(-200);
+    }
+  }
+
+  await user.save();
+  await processPaymentReminders({ customerId: user._id });
 
   res.json({
     ...user.toObject(),
     selectedPackages: cleanCustomerPackages(user.customerProfile?.selectedPackages),
     clientStatus: user.customerProfile?.clientStatus || "active",
     trackingStatusColor: user.customerProfile?.trackingStatusColor || "",
+    paymentReceiveDate: user.customerProfile?.paymentReceiveDate || "",
+    paymentStatus: user.customerProfile?.paymentStatus || "",
+    paymentFollowUpHistory: user.customerProfile?.paymentFollowUpHistory || [],
   });
 });
 

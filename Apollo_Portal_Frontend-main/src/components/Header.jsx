@@ -76,6 +76,13 @@ export default function Header({ onMenuClick }) {
     if (notification?.entityType === "task") {
       return taskRoute(notification.entityId || "");
     }
+    if (
+      user?.role === "pm" &&
+      notification?.entityType === "system" &&
+      notification?.metadata?.customerId
+    ) {
+      return `/pm/clients/${notification.metadata.customerId}`;
+    }
     return routeFor("Notification");
   };
 

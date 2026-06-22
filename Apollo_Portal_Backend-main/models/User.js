@@ -104,6 +104,54 @@ const userSchema = new mongoose.Schema(
         enum: ["", "green", "yellow", "red"],
         default: "",
       },
+      paymentReceiveDate: {
+        type: String,
+        default: "",
+        match: [/^$|^\d{4}-\d{2}-\d{2}$/, "Payment receive date must use YYYY-MM-DD"],
+      },
+      paymentStatus: {
+        type: String,
+        enum: ["", "pending", "payment_due", "follow_up", "collected"],
+        default: "",
+      },
+      paymentFollowUpHistory: {
+        type: [
+          {
+            reminderKey: {
+              type: String,
+              required: true,
+            },
+            type: {
+              type: String,
+              enum: ["payment_details_updated", "payment_reminder", "payment_due_today"],
+              required: true,
+            },
+            paymentReceiveDate: {
+              type: String,
+              default: "",
+            },
+            paymentStatus: {
+              type: String,
+              enum: ["", "pending", "payment_due", "follow_up", "collected"],
+              default: "",
+            },
+            message: {
+              type: String,
+              default: "",
+            },
+            actor: {
+              type: mongoose.Schema.Types.ObjectId,
+              ref: "User",
+              default: null,
+            },
+            createdAt: {
+              type: Date,
+              default: Date.now,
+            },
+          },
+        ],
+        default: [],
+      },
       profileImage: {
         type: String,
         default: "",
